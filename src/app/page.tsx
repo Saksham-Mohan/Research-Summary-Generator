@@ -11,6 +11,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 // Add type for researcher
 type Researcher = { cwid: string; surname: string; givenName: string };
 
+// Add type for publication
+type Publication = {
+  pmid: number;
+  authorPosition: string | null;
+  articleTitle: string;
+  articleYear: number;
+  publicationTypeCanonical: string;
+  doi: string;
+  significanceScore: number;
+  abstractVarchar: string | null;
+};
+
 export default function Home() {
   // State for form fields
   const [facultyId, setFacultyId] = useState("");
@@ -19,7 +31,7 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
-  const [publications, setPublications] = useState(false);
+  const [publications, setPublications] = useState<Publication[]>([]);
   const [grants, setGrants] = useState(false);
   const [abstracts, setAbstracts] = useState(false);
 
@@ -27,8 +39,16 @@ export default function Home() {
   const [length, setLength] = useState("Medium");
   const [timeframe, setTimeframe] = useState("Past 5 years");
   const [directive, setDirective] = useState("");
+  const [audience, setAudience] = useState("General public");
+  const [selectedKeyElements, setSelectedKeyElements] = useState<string[]>([]);
 
   const [summary, setSummary] = useState("");
+  const [summaryTimestamp, setSummaryTimestamp] = useState("");
+  const [history, setHistory] = useState<Array<{
+    date: string;
+    output: string;
+    controls: string;
+  }>>([]);
   const [clarity, setClarity] = useState(3);
   const [accuracy, setAccuracy] = useState(3);
   const [relevance, setRelevance] = useState(3);
@@ -36,6 +56,10 @@ export default function Home() {
   const [tone, setTone] = useState(3);
   const [feedback, setFeedback] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(0);
+  const [selectedPubs, setSelectedPubs] = useState<Set<number>>(new Set());
+  const pageSize = 5;
 
   // Debounced fetch for researcher suggestions
   useEffect(() => {
@@ -78,11 +102,99 @@ export default function Home() {
     }
   }, [showSuggestions]);
 
+  // Fetch publications when researcher is selected
+  useEffect(() => {
+    if (selectedResearcher) {
+      fetch(`/api/publications?personIdentifier=${encodeURIComponent(selectedResearcher.cwid)}`)
+        .then(res => res.json())
+        .then(data => {
+          // Ensure data is an array
+          if (Array.isArray(data)) {
+            setPublications(data);
+          } else {
+            console.error('Publications API returned non-array:', data);
+            setPublications([]);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching publications:', error);
+          setPublications([]);
+        });
+    } else {
+      setPublications([]);
+    }
+  }, [selectedResearcher]);
+
+  useEffect(() => {
+    setCurrentPage(0); // Reset to first page when publications change
+  }, [publications]);
+
+  // Publication pagination logic - ensure publications is always an array
+  const publicationsArray = Array.isArray(publications) ? publications : [];
+  const paginatedPubs = publicationsArray.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const totalPages = Math.ceil(publicationsArray.length / pageSize);
+
   // Generate or regenerate summary
-  const handleGenerateSummary = () => {
-    setSummary(
-      `This is a ${length.toLowerCase()} summary in ${voice.toLowerCase()} voice, covering ${timeframe.toLowerCase()}.$\nCustom directive: ${directive}`
-    );
+  const handleGenerateSummary = async () => {
+    if (!selectedResearcher || selectedPubs.size === 0) {
+      alert('Please select a researcher and at least one publication.');
+      return;
+    }
+
+    try {
+      const selectedPublications = publications.filter(pub => selectedPubs.has(pub.pmid));
+      
+      const response = await fetch('/api/generate-summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selectedPublications,
+          researcherName: `${selectedResearcher.givenName} ${selectedResearcher.surname}`,
+          length,
+          timeframe,
+          voice,
+          tone: summaryTone,
+          audience,
+          keyElements: selectedKeyElements,
+          additionalInstructions: directive
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const newSummary = data.summary;
+        setSummary(newSummary);
+        
+        // Update timestamp
+        const now = new Date();
+        const timestamp = now.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+        setSummaryTimestamp(timestamp);
+        
+        // Add to history
+        const controls = `Voice: ${voice}\nTone: ${summaryTone}\nData used: ${selectedPubs.size} publications`;
+        const historyEntry = {
+          date: now.toISOString().split('T')[0], // YYYY-MM-DD format
+          output: newSummary.substring(0, 100) + (newSummary.length > 100 ? '...' : ''),
+          controls
+        };
+        setHistory(prev => [historyEntry, ...prev.slice(0, 9)]); // Keep last 10 entries
+      } else {
+        const errorData = await response.json();
+        alert(`Error: ${errorData.error || 'Failed to generate summary'}`);
+      }
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      alert('Failed to generate summary. Please try again.');
+    }
   };
 
   // Handle feedback submission
@@ -234,7 +346,7 @@ export default function Home() {
             {/* Audience */}
             <div>
               <Label className="font-semibold block mb-2">Audience</Label>
-              <RadioGroup value={"General public"} onValueChange={() => {}}>
+              <RadioGroup value={audience} onValueChange={setAudience}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="General public" id="audience-public" />
@@ -262,35 +374,83 @@ export default function Home() {
             <Label className="font-semibold block mb-2">Key Elements to Highlight</Label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-problems" />
+                <Checkbox id="highlight-problems" checked={selectedKeyElements.includes('Research problems/questions')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Research problems/questions']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Research problems/questions'));
+                  }
+                }} />
                 <Label htmlFor="highlight-problems">Research problems/questions</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-goals" />
+                <Checkbox id="highlight-goals" checked={selectedKeyElements.includes('Research goals')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Research goals']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Research goals'));
+                  }
+                }} />
                 <Label htmlFor="highlight-goals">Research goals</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-context" />
+                <Checkbox id="highlight-context" checked={selectedKeyElements.includes('Context of research')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Context of research']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Context of research'));
+                  }
+                }} />
                 <Label htmlFor="highlight-context">Context of research</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-clinical" />
+                <Checkbox id="highlight-clinical" checked={selectedKeyElements.includes('Clinical application')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Clinical application']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Clinical application'));
+                  }
+                }} />
                 <Label htmlFor="highlight-clinical">Clinical application</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-findings" />
+                <Checkbox id="highlight-findings" checked={selectedKeyElements.includes('Key findings & significance')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Key findings & significance']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Key findings & significance'));
+                  }
+                }} />
                 <Label htmlFor="highlight-findings">Key findings & significance</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-methods" />
+                <Checkbox id="highlight-methods" checked={selectedKeyElements.includes('Research methods')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Research methods']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Research methods'));
+                  }
+                }} />
                 <Label htmlFor="highlight-methods">Research methods</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-innovative" />
+                <Checkbox id="highlight-innovative" checked={selectedKeyElements.includes('Innovative aspects')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Innovative aspects']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Innovative aspects'));
+                  }
+                }} />
                 <Label htmlFor="highlight-innovative">Innovative aspects</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-recent" />
+                <Checkbox id="highlight-recent" checked={selectedKeyElements.includes('Recent work')} onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedKeyElements([...selectedKeyElements, 'Recent work']);
+                  } else {
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Recent work'));
+                  }
+                }} />
                 <Label htmlFor="highlight-recent">Recent work</Label>
               </div>
             </div>
@@ -309,7 +469,7 @@ export default function Home() {
           </div>
 
           {/* Generate Summary Button */}
-          <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-2 rounded-md mt-2">
+          <Button onClick={handleGenerateSummary} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-2 rounded-md mt-2">
             Generate Summary
           </Button>
         </CardContent>
@@ -318,12 +478,18 @@ export default function Home() {
       {/* Last generated output */}
       <div className="mt-10">
         <h2 className="text-xl font-semibold mb-2">Last generated output</h2>
-        <div className="bg-gray-100 border border-gray-300 rounded p-4 mb-2 flex flex-col">
-          <span className="text-xs text-gray-500 self-end mb-1">Jun 3, 2025, 5:13pm</span>
-          <div className="italic text-gray-800">
-            Dr. Jane Smith is a clinical researcher specializing in cardiovascular epidemiology, with over 15 years of experience leading multi-institutional studies. Her work has focused on identifying genetic and environmental risk factors for heart disease, resulting in over 60 peer-reviewed publications and multiple NIH-funded grants. Notably, she co-led a landmark clinical trial that redefined blood pressure management guidelines in older adults. Dr. Smith's interdisciplinary approach bridges public health, genomics, and health equity to improve population outcomes. Her research continues to inform clinical practice and health policy on a national scale.
+        {summary ? (
+          <div className="bg-gray-100 border border-gray-300 rounded p-4 mb-2 flex flex-col">
+            <span className="text-xs text-gray-500 self-end mb-1">{summaryTimestamp}</span>
+            <div className="italic text-gray-800">
+              {summary}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-gray-100 border border-gray-300 rounded p-4 mb-2">
+            <div className="text-gray-500 italic">No summary generated yet. Select a researcher, choose publications, and click "Generate Summary" to create your first summary.</div>
+          </div>
+        )}
       </div>
 
       {/* Source data */}
@@ -332,7 +498,9 @@ export default function Home() {
         <p className="text-sm text-gray-700 mb-2">Select data that will be used to generate the statement.</p>
         {/* Tabs */}
         <div className="flex space-x-2 mb-2">
-          <button className="bg-gray-800 text-white px-3 py-1 rounded font-semibold">Publications <span className="ml-1 text-xs font-normal">14</span></button>
+          <button className="bg-gray-800 text-white px-3 py-1 rounded font-semibold">
+            Publications <span className="ml-1 text-xs font-normal">{selectedPubs.size}</span>
+          </button>
           <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Grants <span className="ml-1 text-xs">8</span></button>
           <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Clinical Trials <span className="ml-1 text-xs">7</span></button>
           <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Clinical Specialties <span className="ml-1 text-xs">9</span></button>
@@ -340,7 +508,15 @@ export default function Home() {
         {/* Controls */}
         <div className="flex items-center space-x-4 mb-2">
           <div className="flex items-center space-x-2">
-            <Checkbox id="select-all" />
+            <Checkbox id="select-all" checked={paginatedPubs.every(pub => selectedPubs.has(pub.pmid)) && paginatedPubs.length > 0} onCheckedChange={checked => {
+              const newSet = new Set(selectedPubs);
+              if (checked) {
+                paginatedPubs.forEach(pub => newSet.add(pub.pmid));
+              } else {
+                paginatedPubs.forEach(pub => newSet.delete(pub.pmid));
+              }
+              setSelectedPubs(newSet);
+            }} />
             <Label htmlFor="select-all">Select all / none</Label>
           </div>
           <div className="flex items-center space-x-2">
@@ -351,19 +527,54 @@ export default function Home() {
         </div>
         {/* Publication list */}
         <div className="space-y-3 mt-2">
-          {[1,2,3].map(i => (
-            <div key={i} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
-              <Checkbox id={`pub-${i}`} className="mt-1" />
-              <div>
-                <div className="font-semibold mb-1">AutoRadAI: a versatile artificial intelligence framework validated for detecting extracapsular extension in prostate cancer.</div>
-                <div className="text-sm text-gray-700 mb-1">Preoperative identification of extracapsular extension (ECE) in prostate cancer (PCa) is crucial for effective treatment planning, as ECE presence significantly increases the risk of positive surgical margins and early biochemical recurrence following radical…</div>
-                <div className="text-xs text-gray-500">
-                  PMID: 4101234 &nbsp; Year: 2025. &nbsp; Journal: BMJ. &nbsp; <span className="font-medium">Type:</span> Academic Article. &nbsp; <span className="font-medium">Author position:</span> Last &nbsp; <span className="font-medium">Significance score:</span> 32
+          {paginatedPubs.length === 0 ? (
+            <div className="text-gray-500 italic">No publications found.</div>
+          ) : (
+            paginatedPubs.map((pub, i) => (
+              <div key={pub.pmid} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
+                <Checkbox id={`pub-${pub.pmid}`} className="mt-1" checked={selectedPubs.has(pub.pmid)} onCheckedChange={checked => {
+                  const newSet = new Set(selectedPubs);
+                  if (checked) newSet.add(pub.pmid);
+                  else newSet.delete(pub.pmid);
+                  setSelectedPubs(newSet);
+                }} />
+                <div>
+                  <div className="font-semibold mb-1">{pub.articleTitle}</div>
+                  {pub.abstractVarchar && (
+                    <div className="text-sm text-gray-700 mb-1 line-clamp-2">
+                      {pub.abstractVarchar}
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-500">
+                    PMID: {pub.pmid} &nbsp; Year: {pub.articleYear}. &nbsp; <span className="font-medium">Type:</span> {pub.publicationTypeCanonical}. &nbsp; <span className="font-medium">Author position:</span> {pub.authorPosition || 'N/A'}
+                    <br />
+                    <span className="font-medium">Significance score:</span> {pub.significanceScore}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
+        {/* Pagination controls */}
+        {totalPages > 1 && (
+          <div className="flex justify-center items-center space-x-4 mt-4">
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-gray-600">Page {currentPage + 1} of {totalPages}</span>
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage >= totalPages - 1}
+              onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* History */}
@@ -372,29 +583,32 @@ export default function Home() {
         <div className="flex justify-end mb-2">
           <Button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">Export to CSV</Button>
         </div>
-        <div className="overflow-x-auto bg-white border border-gray-200 rounded">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="px-4 py-2 text-left font-semibold">Date</th>
-                <th className="px-4 py-2 text-left font-semibold">Output</th>
-                <th className="px-4 py-2 text-left font-semibold">Controls</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="px-4 py-2 align-top">2025-06-01</td>
-                <td className="px-4 py-2 align-top">Dr. Jane Smith is a clinical researcher specializing in cardiovascular epidemiology, with over 15 years of experience leading multi-institutional studies. Her work has focused on identifying genetic</td>
-                <td className="px-4 py-2 align-top">Voice: First. Tone: Formal. Data used: xxxx</td>
-              </tr>
-              <tr>
-                <td className="px-4 py-2 align-top">2025-05-30</td>
-                <td className="px-4 py-2 align-top">Dr. Jane Smith is a clinical researcher specializing in cardiovascular epidemiology, with over 15 years of experience leading multi-institutional studies. Her work has focused on identifying genetic</td>
-                <td className="px-4 py-2 align-top">Voice: First. Tone: Formal. Data used: xxxx</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        {history.length > 0 ? (
+          <div className="overflow-x-auto bg-white border border-gray-200 rounded">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="px-4 py-2 text-left font-semibold">Date</th>
+                  <th className="px-4 py-2 text-left font-semibold">Output</th>
+                  <th className="px-4 py-2 text-left font-semibold">Controls</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((entry, index) => (
+                  <tr key={index}>
+                    <td className="px-4 py-2 align-top">{entry.date}</td>
+                    <td className="px-4 py-2 align-top">{entry.output}</td>
+                    <td className="px-4 py-2 align-top">{entry.controls}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded p-4">
+            <div className="text-gray-500 italic">No history yet. Generate your first summary to see it here.</div>
+          </div>
+        )}
       </div>
 
       <footer className="text-sm text-gray-500 border-t pt-4 text-center">
