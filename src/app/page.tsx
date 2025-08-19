@@ -23,6 +23,29 @@ type Publication = {
   abstractVarchar: string | null;
 };
 
+// Add type for grant
+type Grant = {
+  [key: string]: any; // Using any for now since we don't know the exact structure
+};
+
+// Add type for clinical specialty
+type ClinicalSpecialty = {
+  cwid: string;
+  personMesh: string;
+  scoreBestMatch: number;
+};
+
+// Add type for clinical trial
+type ClinicalTrial = {
+  cwid: string;
+  title: string;
+  protocolType: string;
+  nctNumber: string;
+  overallCurrentStatus: string;
+  phases: string;
+  briefSummary: string | null;
+};
+
 export default function Home() {
   // State for form fields
   const [facultyId, setFacultyId] = useState("");
@@ -32,15 +55,22 @@ export default function Home() {
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const [publications, setPublications] = useState<Publication[]>([]);
-  const [grants, setGrants] = useState(false);
-  const [abstracts, setAbstracts] = useState(false);
+  const [grantsData, setGrantsData] = useState<Grant[]>([]);
+  const [clinicalSpecialties, setClinicalSpecialties] = useState<ClinicalSpecialty[]>([]);
+  const [clinicalTrials, setClinicalTrials] = useState<ClinicalTrial[]>([]);
+  const [abstracts, setAbstracts] = useState(true);
+  const [includeTrialSummaries, setIncludeTrialSummaries] = useState(true);
 
-  const [voice, setVoice] = useState("Third-person");
+  const [voice, setVoice] = useState("Third person");
   const [length, setLength] = useState("Medium");
   const [timeframe, setTimeframe] = useState("Past 5 years");
   const [directive, setDirective] = useState("");
   const [audience, setAudience] = useState("General public");
-  const [selectedKeyElements, setSelectedKeyElements] = useState<string[]>([]);
+  const [selectedKeyElements, setSelectedKeyElements] = useState<string[]>([
+    'Research problems/questions',
+    'Research goals',
+    'Research methods'
+  ]);
 
   const [summary, setSummary] = useState("");
   const [summaryTimestamp, setSummaryTimestamp] = useState("");
@@ -56,10 +86,18 @@ export default function Home() {
   const [tone, setTone] = useState(3);
   const [feedback, setFeedback] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(0);
   const [selectedPubs, setSelectedPubs] = useState<Set<number>>(new Set());
+  const [selectedGrants, setSelectedGrants] = useState<Set<string>>(new Set());
+  const [selectedSpecialties, setSelectedSpecialties] = useState<Set<string>>(new Set());
+  const [selectedTrials, setSelectedTrials] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<'publications' | 'grants' | 'clinical-trials' | 'clinical-specialties'>('publications');
   const pageSize = 5;
+  const grantsPageSize = 7;
+  const specialtiesPageSize = 10;
+  const trialsPageSize = 8;
 
   // Debounced fetch for researcher suggestions
   useEffect(() => {
@@ -125,14 +163,110 @@ export default function Home() {
     }
   }, [selectedResearcher]);
 
+  // Fetch grants when researcher is selected
+  useEffect(() => {
+    if (selectedResearcher) {
+      fetch(`/api/grants?cwid=${encodeURIComponent(selectedResearcher.cwid)}`)
+        .then(res => res.json())
+        .then(data => {
+          // Ensure data is an array
+          if (Array.isArray(data)) {
+            setGrantsData(data);
+          } else {
+            console.error('Grants API returned non-array:', data);
+            setGrantsData([]);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching grants:', error);
+          setGrantsData([]);
+        });
+    } else {
+      setGrantsData([]);
+    }
+  }, [selectedResearcher]);
+
+  // Fetch clinical specialties when researcher is selected
+  useEffect(() => {
+    if (selectedResearcher) {
+      fetch(`/api/clinical-specialties?cwid=${encodeURIComponent(selectedResearcher.cwid)}`)
+        .then(res => res.json())
+        .then(data => {
+          // Ensure data is an array
+          if (Array.isArray(data)) {
+            setClinicalSpecialties(data);
+          } else {
+            console.error('Clinical specialties API returned non-array:', data);
+            setClinicalSpecialties([]);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching clinical specialties:', error);
+          setClinicalSpecialties([]);
+        });
+    } else {
+      setClinicalSpecialties([]);
+    }
+  }, [selectedResearcher]);
+
+  // Fetch clinical trials when researcher is selected
+  useEffect(() => {
+    if (selectedResearcher) {
+      fetch(`/api/clinical-trials?cwid=${encodeURIComponent(selectedResearcher.cwid)}`)
+        .then(res => res.json())
+        .then(data => {
+          // Ensure data is an array
+          if (Array.isArray(data)) {
+            setClinicalTrials(data);
+          } else {
+            console.error('Clinical trials API returned non-array:', data);
+            setClinicalTrials([]);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching clinical trials:', error);
+          setClinicalTrials([]);
+        });
+    } else {
+      setClinicalTrials([]);
+    }
+  }, [selectedResearcher]);
+
   useEffect(() => {
     setCurrentPage(0); // Reset to first page when publications change
   }, [publications]);
+
+  useEffect(() => {
+    setCurrentPage(0); // Reset to first page when grants change
+  }, [grantsData]);
+
+  useEffect(() => {
+    setCurrentPage(0); // Reset to first page when clinical specialties change
+  }, [clinicalSpecialties]);
+
+  useEffect(() => {
+    setCurrentPage(0); // Reset to first page when clinical trials change
+  }, [clinicalTrials]);
 
   // Publication pagination logic - ensure publications is always an array
   const publicationsArray = Array.isArray(publications) ? publications : [];
   const paginatedPubs = publicationsArray.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
   const totalPages = Math.ceil(publicationsArray.length / pageSize);
+
+  // Grants pagination logic - ensure grants is always an array
+  const grantsArray = Array.isArray(grantsData) ? grantsData : [];
+  const paginatedGrants = grantsArray.slice(currentPage * grantsPageSize, (currentPage + 1) * grantsPageSize);
+  const totalGrantsPages = Math.ceil(grantsArray.length / grantsPageSize);
+
+  // Clinical specialties pagination logic - ensure specialties is always an array
+  const specialtiesArray = Array.isArray(clinicalSpecialties) ? clinicalSpecialties : [];
+  const paginatedSpecialties = specialtiesArray.slice(currentPage * specialtiesPageSize, (currentPage + 1) * specialtiesPageSize);
+  const totalSpecialtiesPages = Math.ceil(specialtiesArray.length / specialtiesPageSize);
+
+  // Clinical trials pagination logic - ensure trials is always an array
+  const trialsArray = Array.isArray(clinicalTrials) ? clinicalTrials : [];
+  const paginatedTrials = trialsArray.slice(currentPage * trialsPageSize, (currentPage + 1) * trialsPageSize);
+  const totalTrialsPages = Math.ceil(trialsArray.length / trialsPageSize);
 
   // Generate or regenerate summary
   const handleGenerateSummary = async () => {
@@ -141,8 +275,32 @@ export default function Home() {
       return;
     }
 
+    // Check if "Grants received" is selected but no grants are chosen
+    if (selectedKeyElements.includes('Grants received') && selectedGrants.size === 0) {
+      alert('Please select at least one grant when "Grants received" is highlighted.');
+      return;
+    }
+
+    // Check if "Clinical application" is selected but no clinical data is chosen
+    if (selectedKeyElements.includes('Clinical application') && selectedSpecialties.size === 0 && selectedTrials.size === 0) {
+      alert('Please select at least one clinical specialty or clinical trial when "Clinical application" is highlighted.');
+      return;
+    }
+
+    setIsGenerating(true);
+
     try {
       const selectedPublications = publications.filter(pub => selectedPubs.has(pub.pmid));
+      const selectedGrantsData = grantsData.filter(grant => {
+        const grantId = grant.id || grant.grant_id || JSON.stringify(grant);
+        return selectedGrants.has(grantId);
+      });
+      const selectedSpecialtiesData = clinicalSpecialties.filter(specialty => 
+        selectedSpecialties.has(specialty.personMesh)
+      );
+      const selectedTrialsData = clinicalTrials.filter(trial => 
+        selectedTrials.has(trial.nctNumber)
+      );
       
       const response = await fetch('/api/generate-summary', {
         method: 'POST',
@@ -151,14 +309,20 @@ export default function Home() {
         },
         body: JSON.stringify({
           selectedPublications,
+          selectedGrants: selectedGrantsData,
+          selectedSpecialties: selectedSpecialtiesData,
+          selectedTrials: selectedTrialsData,
           researcherName: `${selectedResearcher.givenName} ${selectedResearcher.surname}`,
+          cwid: selectedResearcher.cwid,
           length,
           timeframe,
           voice,
           tone: summaryTone,
           audience,
           keyElements: selectedKeyElements,
-          additionalInstructions: directive
+          additionalInstructions: directive,
+          includeAbstracts: abstracts,
+          includeTrialSummaries: includeTrialSummaries
         }),
       });
 
@@ -183,7 +347,7 @@ export default function Home() {
         const controls = `Voice: ${voice}\nTone: ${summaryTone}\nData used: ${selectedPubs.size} publications`;
         const historyEntry = {
           date: now.toISOString().split('T')[0], // YYYY-MM-DD format
-          output: newSummary.substring(0, 100) + (newSummary.length > 100 ? '...' : ''),
+          output: newSummary, // Store the full summary
           controls
         };
         setHistory(prev => [historyEntry, ...prev.slice(0, 9)]); // Keep last 10 entries
@@ -194,6 +358,8 @@ export default function Home() {
     } catch (error) {
       console.error('Error generating summary:', error);
       alert('Failed to generate summary. Please try again.');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -204,8 +370,38 @@ export default function Home() {
     setTimeout(() => setFeedbackSubmitted(false), 2000);
   };
 
+  // Export history to CSV
+  const handleExportToCSV = () => {
+    if (history.length === 0) {
+      alert('No history to export.');
+      return;
+    }
+
+    // Create CSV content
+    const headers = ['Date', 'Output', 'Controls'];
+    const csvContent = [
+      headers.join(','),
+      ...history.map(entry => [
+        entry.date,
+        `"${entry.output.replace(/"/g, '""')}"`, // Escape quotes in output
+        `"${entry.controls.replace(/"/g, '""')}"` // Escape quotes in controls
+      ].join(','))
+    ].join('\n');
+
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `research_summary_history_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <main className="max-w-2xl mx-auto p-8 space-y-8 bg-gradient-to-br from-gray-50 to-white min-h-screen">
+    <main className="max-w-none mx-auto p-8 space-y-8 bg-gradient-to-br from-gray-50 to-white min-h-screen">
       <h1 className="text-3xl font-extrabold mb-2 tracking-tight text-primary">
         AI-Powered Research Summary Generator
       </h1>
@@ -213,12 +409,9 @@ export default function Home() {
         Create professional, consistent research summaries for faculty profiles.
       </p>
 
-      {/* Research Summary Generator Section - matches screenshot */}
-      <Card className="p-8 max-w-3xl mx-auto">
+      {/* Research Summary Generator Section */}
+      <Card className="p-8 max-w-none mx-auto">
         <CardContent className="p-0">
-          {/* Title and subtitle */}
-          <h1 className="text-3xl font-bold mb-1">AI Research Summary Generator</h1>
-          <p className="text-base text-gray-700 mb-6">Create a professional research summary based on your selected criteria.</p>
 
           {/* Researcher Select */}
           <div className="mb-6">
@@ -237,7 +430,7 @@ export default function Home() {
                 onFocus={() => {
                   if (suggestions.length > 0) setShowSuggestions(true);
                 }}
-                className="rounded-md border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-lg px-3 py-2 mb-0"
+                className="rounded-md border-gray-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-300 text-lg px-3 py-2 mb-0"
                 autoComplete="off"
               />
               {/* Dropdown suggestions */}
@@ -269,15 +462,15 @@ export default function Home() {
               <RadioGroup value={length} onValueChange={setLength}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Short" id="length-short" />
+                    <RadioGroupItem value="Short" id="length-short" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="length-short">Short (phrase)</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Medium" id="length-medium" />
+                    <RadioGroupItem value="Medium" id="length-medium" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="length-medium">Medium (paragraph)</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Extended" id="length-extended" />
+                    <RadioGroupItem value="Extended" id="length-extended" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="length-extended">Extended overview</Label>
                   </div>
                 </div>
@@ -289,15 +482,15 @@ export default function Home() {
               <RadioGroup value={timeframe} onValueChange={setTimeframe}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Past 5 years" id="tf-5" />
+                    <RadioGroupItem value="Past 5 years" id="tf-5" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tf-5">Past 5 years</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Past 10 years" id="tf-10" />
+                    <RadioGroupItem value="Past 10 years" id="tf-10" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tf-10">Past 10 years</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Entire career" id="tf-career" />
+                    <RadioGroupItem value="Entire career" id="tf-career" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tf-career">Entire career</Label>
                   </div>
                 </div>
@@ -309,11 +502,11 @@ export default function Home() {
               <RadioGroup value={voice} onValueChange={setVoice}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Third person" id="voice-third" />
+                    <RadioGroupItem value="Third person" id="voice-third" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="voice-third">Third person</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="First person" id="voice-first" />
+                    <RadioGroupItem value="First person" id="voice-first" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="voice-first">First person</Label>
                   </div>
                 </div>
@@ -325,19 +518,19 @@ export default function Home() {
               <RadioGroup value={summaryTone} onValueChange={setSummaryTone}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Formal" id="tone-formal" />
+                    <RadioGroupItem value="Formal" id="tone-formal" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tone-formal">Formal</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Informal" id="tone-informal" />
+                    <RadioGroupItem value="Informal" id="tone-informal" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tone-informal">Informal</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Neutral" id="tone-neutral" />
+                    <RadioGroupItem value="Neutral" id="tone-neutral" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tone-neutral">Neutral</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Kim Jong Un" id="tone-kju" />
+                    <RadioGroupItem value="Kim Jong Un" id="tone-kju" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="tone-kju">Kim Jong Un</Label>
                   </div>
                 </div>
@@ -349,19 +542,19 @@ export default function Home() {
               <RadioGroup value={audience} onValueChange={setAudience}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="General public" id="audience-public" />
+                    <RadioGroupItem value="General public" id="audience-public" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="audience-public">General public</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Academic peers" id="audience-peers" />
+                    <RadioGroupItem value="Academic peers" id="audience-peers" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="audience-peers">Academic peers</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Grant reviewers, funders" id="audience-grant" />
+                    <RadioGroupItem value="Grant reviewers, funders" id="audience-grant" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="audience-grant">Grant reviewers, funders</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Prospective patients" id="audience-patients" />
+                    <RadioGroupItem value="Prospective patients" id="audience-patients" className="text-blue-600 border-blue-600 focus:ring-blue-600" />
                     <Label htmlFor="audience-patients">Prospective patients</Label>
                   </div>
                 </div>
@@ -374,7 +567,7 @@ export default function Home() {
             <Label className="font-semibold block mb-2">Key Elements to Highlight</Label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-problems" checked={selectedKeyElements.includes('Research problems/questions')} onCheckedChange={(checked) => {
+                <Checkbox id="highlight-problems" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedKeyElements.includes('Research problems/questions')} onCheckedChange={(checked) => {
                   if (checked) {
                     setSelectedKeyElements([...selectedKeyElements, 'Research problems/questions']);
                   } else {
@@ -384,7 +577,7 @@ export default function Home() {
                 <Label htmlFor="highlight-problems">Research problems/questions</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-goals" checked={selectedKeyElements.includes('Research goals')} onCheckedChange={(checked) => {
+                <Checkbox id="highlight-goals" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedKeyElements.includes('Research goals')} onCheckedChange={(checked) => {
                   if (checked) {
                     setSelectedKeyElements([...selectedKeyElements, 'Research goals']);
                   } else {
@@ -394,37 +587,7 @@ export default function Home() {
                 <Label htmlFor="highlight-goals">Research goals</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-context" checked={selectedKeyElements.includes('Context of research')} onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedKeyElements([...selectedKeyElements, 'Context of research']);
-                  } else {
-                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Context of research'));
-                  }
-                }} />
-                <Label htmlFor="highlight-context">Context of research</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-clinical" checked={selectedKeyElements.includes('Clinical application')} onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedKeyElements([...selectedKeyElements, 'Clinical application']);
-                  } else {
-                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Clinical application'));
-                  }
-                }} />
-                <Label htmlFor="highlight-clinical">Clinical application</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-findings" checked={selectedKeyElements.includes('Key findings & significance')} onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedKeyElements([...selectedKeyElements, 'Key findings & significance']);
-                  } else {
-                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Key findings & significance'));
-                  }
-                }} />
-                <Label htmlFor="highlight-findings">Key findings & significance</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-methods" checked={selectedKeyElements.includes('Research methods')} onCheckedChange={(checked) => {
+                <Checkbox id="highlight-methods" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedKeyElements.includes('Research methods')} onCheckedChange={(checked) => {
                   if (checked) {
                     setSelectedKeyElements([...selectedKeyElements, 'Research methods']);
                   } else {
@@ -434,24 +597,24 @@ export default function Home() {
                 <Label htmlFor="highlight-methods">Research methods</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-innovative" checked={selectedKeyElements.includes('Innovative aspects')} onCheckedChange={(checked) => {
+                <Checkbox id="highlight-clinical" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedKeyElements.includes('Clinical application')} onCheckedChange={(checked) => {
                   if (checked) {
-                    setSelectedKeyElements([...selectedKeyElements, 'Innovative aspects']);
+                    setSelectedKeyElements([...selectedKeyElements, 'Clinical application']);
                   } else {
-                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Innovative aspects'));
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Clinical application'));
                   }
                 }} />
-                <Label htmlFor="highlight-innovative">Innovative aspects</Label>
+                <Label htmlFor="highlight-clinical">Clinical application</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox id="highlight-recent" checked={selectedKeyElements.includes('Recent work')} onCheckedChange={(checked) => {
+                <Checkbox id="highlight-grants" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedKeyElements.includes('Grants received')} onCheckedChange={(checked) => {
                   if (checked) {
-                    setSelectedKeyElements([...selectedKeyElements, 'Recent work']);
+                    setSelectedKeyElements([...selectedKeyElements, 'Grants received']);
                   } else {
-                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Recent work'));
+                    setSelectedKeyElements(selectedKeyElements.filter(el => el !== 'Grants received'));
                   }
                 }} />
-                <Label htmlFor="highlight-recent">Recent work</Label>
+                <Label htmlFor="highlight-grants">Grants received</Label>
               </div>
             </div>
           </div>
@@ -464,13 +627,24 @@ export default function Home() {
               placeholder=""
               value={directive}
               onChange={e => setDirective(e.target.value)}
-              className="w-full min-h-[48px] border-gray-400 rounded-md"
+              className="w-full min-h-[48px] border-gray-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-300 rounded-md"
             />
           </div>
 
           {/* Generate Summary Button */}
-          <Button onClick={handleGenerateSummary} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-2 rounded-md mt-2">
-            Generate Summary
+          <Button 
+            onClick={handleGenerateSummary} 
+            disabled={isGenerating}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-2 rounded-md mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? (
+              <div className="flex items-center justify-center space-x-2">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                <span>Generating Summary...</span>
+              </div>
+            ) : (
+              "Generate Summary"
+            )}
           </Button>
         </CardContent>
       </Card>
@@ -498,65 +672,262 @@ export default function Home() {
         <p className="text-sm text-gray-700 mb-2">Select data that will be used to generate the statement.</p>
         {/* Tabs */}
         <div className="flex space-x-2 mb-2">
-          <button className="bg-gray-800 text-white px-3 py-1 rounded font-semibold">
-            Publications <span className="ml-1 text-xs font-normal">{selectedPubs.size}</span>
+          <button 
+            className={`px-3 py-1 rounded font-semibold ${activeTab === 'publications' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+            onClick={() => setActiveTab('publications')}
+          >
+            Publications <span className="ml-1 text-xs font-normal">{publicationsArray.length}</span>
           </button>
-          <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Grants <span className="ml-1 text-xs">8</span></button>
-          <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Clinical Trials <span className="ml-1 text-xs">7</span></button>
-          <button className="bg-gray-200 text-gray-700 px-3 py-1 rounded">Clinical Specialties <span className="ml-1 text-xs">9</span></button>
+          <button 
+            className={`px-3 py-1 rounded font-semibold ${activeTab === 'grants' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+            onClick={() => setActiveTab('grants')}
+          >
+            Grants <span className="ml-1 text-xs font-normal">{grantsArray.length}</span>
+          </button>
+          <button 
+            className={`px-3 py-1 rounded font-semibold ${activeTab === 'clinical-trials' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+            onClick={() => setActiveTab('clinical-trials')}
+          >
+            Clinical Trials <span className="ml-1 text-xs font-normal">{trialsArray.length}</span>
+          </button>
+          <button 
+            className={`px-3 py-1 rounded font-semibold ${activeTab === 'clinical-specialties' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
+            onClick={() => setActiveTab('clinical-specialties')}
+          >
+            Clinical Specialties <span className="ml-1 text-xs font-normal">{specialtiesArray.length}</span>
+          </button>
         </div>
         {/* Controls */}
         <div className="flex items-center space-x-4 mb-2">
-          <div className="flex items-center space-x-2">
-            <Checkbox id="select-all" checked={paginatedPubs.every(pub => selectedPubs.has(pub.pmid)) && paginatedPubs.length > 0} onCheckedChange={checked => {
-              const newSet = new Set(selectedPubs);
-              if (checked) {
-                paginatedPubs.forEach(pub => newSet.add(pub.pmid));
-              } else {
-                paginatedPubs.forEach(pub => newSet.delete(pub.pmid));
-              }
-              setSelectedPubs(newSet);
-            }} />
-            <Label htmlFor="select-all">Select all / none</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Checkbox id="include-abstracts" />
-            <Label htmlFor="include-abstracts">Include abstracts</Label>
-          </div>
-          <Input type="text" placeholder="Filter by PMID(s), article title, etc." className="w-64 ml-4" />
-        </div>
-        {/* Publication list */}
-        <div className="space-y-3 mt-2">
-          {paginatedPubs.length === 0 ? (
-            <div className="text-gray-500 italic">No publications found.</div>
-          ) : (
-            paginatedPubs.map((pub, i) => (
-              <div key={pub.pmid} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
-                <Checkbox id={`pub-${pub.pmid}`} className="mt-1" checked={selectedPubs.has(pub.pmid)} onCheckedChange={checked => {
+          {activeTab === 'publications' && (
+            <>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="select-all" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={paginatedPubs.every(pub => selectedPubs.has(pub.pmid)) && paginatedPubs.length > 0} onCheckedChange={checked => {
                   const newSet = new Set(selectedPubs);
-                  if (checked) newSet.add(pub.pmid);
-                  else newSet.delete(pub.pmid);
+                  if (checked) {
+                    paginatedPubs.forEach(pub => newSet.add(pub.pmid));
+                  } else {
+                    paginatedPubs.forEach(pub => newSet.delete(pub.pmid));
+                  }
                   setSelectedPubs(newSet);
                 }} />
-                <div>
-                  <div className="font-semibold mb-1">{pub.articleTitle}</div>
-                  {pub.abstractVarchar && (
-                    <div className="text-sm text-gray-700 mb-1 line-clamp-2">
-                      {pub.abstractVarchar}
-                    </div>
-                  )}
-                  <div className="text-xs text-gray-500">
-                    PMID: {pub.pmid} &nbsp; Year: {pub.articleYear}. &nbsp; <span className="font-medium">Type:</span> {pub.publicationTypeCanonical}. &nbsp; <span className="font-medium">Author position:</span> {pub.authorPosition || 'N/A'}
-                    <br />
-                    <span className="font-medium">Significance score:</span> {pub.significanceScore}
-                  </div>
-                </div>
+                <Label htmlFor="select-all">Select all / none</Label>
               </div>
-            ))
+              <div className="flex items-center space-x-2">
+                <Checkbox id="include-abstracts" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={abstracts} onCheckedChange={(checked) => setAbstracts(checked === true)} />
+                <Label htmlFor="include-abstracts">Include abstracts</Label>
+              </div>
+              <Input type="text" placeholder="Filter by PMID(s), article title, etc." className="w-64 ml-4 focus:border-blue-700 focus:ring-2 focus:ring-blue-300" />
+            </>
+          )}
+          {activeTab === 'grants' && (
+            <>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="select-all-grants" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={paginatedGrants.every(grant => selectedGrants.has(grant.id || grant.grant_id || JSON.stringify(grant))) && paginatedGrants.length > 0} onCheckedChange={checked => {
+                  const newSet = new Set<string>(selectedGrants);
+                  if (checked) {
+                    // Select all grants on current page
+                    paginatedGrants.forEach(grant => {
+                      const grantId = grant.id || grant.grant_id || JSON.stringify(grant);
+                      newSet.add(grantId);
+                    });
+                  } else {
+                    // Deselect all grants on current page
+                    paginatedGrants.forEach(grant => {
+                      const grantId = grant.id || grant.grant_id || JSON.stringify(grant);
+                      newSet.delete(grantId);
+                    });
+                  }
+                  setSelectedGrants(newSet);
+                }} />
+                <Label htmlFor="select-all-grants">Select all / none</Label>
+              </div>
+              <Input type="text" placeholder="Filter grants..." className="w-64 ml-4 focus:border-blue-700 focus:ring-2 focus:ring-blue-300" />
+            </>
+          )}
+          {activeTab === 'clinical-specialties' && (
+            <>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="select-all-specialties" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={paginatedSpecialties.every(specialty => selectedSpecialties.has(specialty.personMesh)) && paginatedSpecialties.length > 0} onCheckedChange={checked => {
+                  const newSet = new Set<string>(selectedSpecialties);
+                  if (checked) {
+                    // Select all specialties on current page
+                    paginatedSpecialties.forEach(specialty => {
+                      newSet.add(specialty.personMesh);
+                    });
+                  } else {
+                    // Deselect all specialties on current page
+                    paginatedSpecialties.forEach(specialty => {
+                      newSet.delete(specialty.personMesh);
+                    });
+                  }
+                  setSelectedSpecialties(newSet);
+                }} />
+                <Label htmlFor="select-all-specialties">Select all / none</Label>
+              </div>
+              <Input type="text" placeholder="Filter specialties..." className="w-64 ml-4 focus:border-blue-700 focus:ring-2 focus:ring-blue-300" />
+            </>
+          )}
+          {activeTab === 'clinical-trials' && (
+            <>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="select-all-trials" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={paginatedTrials.every(trial => selectedTrials.has(trial.nctNumber)) && paginatedTrials.length > 0} onCheckedChange={checked => {
+                  const newSet = new Set<string>(selectedTrials);
+                  if (checked) {
+                    // Select all trials on current page
+                    paginatedTrials.forEach(trial => {
+                      newSet.add(trial.nctNumber);
+                    });
+                  } else {
+                    // Deselect all trials on current page
+                    paginatedTrials.forEach(trial => {
+                      newSet.delete(trial.nctNumber);
+                    });
+                  }
+                  setSelectedTrials(newSet);
+                }} />
+                <Label htmlFor="select-all-trials">Select all / none</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="include-trial-summaries" className="text-blue-600 border-blue-600 focus:ring-blue-600" checked={includeTrialSummaries} onCheckedChange={(checked) => setIncludeTrialSummaries(checked === true)} />
+                <Label htmlFor="include-trial-summaries">Include summaries</Label>
+              </div>
+              <Input type="text" placeholder="Filter trials..." className="w-64 ml-4 focus:border-blue-700 focus:ring-2 focus:ring-blue-300" />
+            </>
+          )}
+        </div>
+        {/* Data list */}
+        <div className="space-y-3 mt-2">
+          {activeTab === 'publications' && (
+            <>
+              {paginatedPubs.length === 0 ? (
+                <div className="text-gray-500 italic">No publications found.</div>
+              ) : (
+                paginatedPubs.map((pub, i) => (
+                  <div key={pub.pmid} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
+                    <Checkbox id={`pub-${pub.pmid}`} className="mt-1 text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedPubs.has(pub.pmid)} onCheckedChange={checked => {
+                      const newSet = new Set(selectedPubs);
+                      if (checked) newSet.add(pub.pmid);
+                      else newSet.delete(pub.pmid);
+                      setSelectedPubs(newSet);
+                    }} />
+                    <div>
+                      <div className="font-semibold mb-1">{pub.articleTitle}</div>
+                      {pub.abstractVarchar && (
+                        <div className="text-sm text-gray-700 mb-1 line-clamp-2">
+                          {pub.abstractVarchar}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        PMID: {pub.pmid} &nbsp; Year: {pub.articleYear}. &nbsp; <span className="font-medium">Type:</span> {pub.publicationTypeCanonical}. &nbsp; <span className="font-medium">Author position:</span> {pub.authorPosition || 'N/A'}
+                        <br />
+                        <span className="font-medium">Significance score:</span> {pub.significanceScore}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          )}
+          
+          {activeTab === 'grants' && (
+            <>
+              {paginatedGrants.length === 0 ? (
+                <div className="text-gray-500 italic">No grants found.</div>
+              ) : (
+                paginatedGrants.map((grant, i) => {
+                  const grantId = grant.id || grant.grant_id || JSON.stringify(grant);
+                  return (
+                    <div key={grantId} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
+                      <Checkbox id={`grant-${grantId}`} className="mt-1 text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedGrants.has(grantId)} onCheckedChange={checked => {
+                        const newSet = new Set(selectedGrants);
+                        if (checked) newSet.add(grantId);
+                        else newSet.delete(grantId);
+                        setSelectedGrants(newSet);
+                      }} />
+                      <div>
+                        <div className="font-semibold mb-1">
+                          {grant.proj_title || 'Untitled Grant'}
+                        </div>
+                        <div className="text-xs text-gray-500 space-x-4">
+                          {grant.Orig_Sponsor && <span><span className="font-medium">Agency:</span> {grant.Orig_Sponsor}</span>}
+                          {grant.Award_Number && <span><span className="font-medium">Award #:</span> {grant.Award_Number}</span>}
+                          {grant.begin_date && <span><span className="font-medium">Start:</span> {grant.begin_date}</span>}
+                          {grant.end_date && <span><span className="font-medium">End:</span> {grant.end_date}</span>}
+                          {grant.Role && <span><span className="font-medium">Role:</span> {grant.Role}</span>}
+                          {grant.unit_name && <span><span className="font-medium">Unit:</span> {grant.unit_name}</span>}
+                        </div>
+                        {grant.abstract && (
+                          <div className="text-sm text-gray-700 mt-1 line-clamp-2">
+                            {grant.abstract}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+          
+          {activeTab === 'clinical-trials' && (
+            <>
+              {paginatedTrials.length === 0 ? (
+                <div className="text-gray-500 italic">No clinical trials found.</div>
+              ) : (
+                paginatedTrials.map((trial, i) => (
+                  <div key={trial.nctNumber} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
+                    <Checkbox id={`trial-${trial.nctNumber}`} className="mt-1 text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedTrials.has(trial.nctNumber)} onCheckedChange={checked => {
+                      const newSet = new Set<string>(selectedTrials);
+                      if (checked) newSet.add(trial.nctNumber);
+                      else newSet.delete(trial.nctNumber);
+                      setSelectedTrials(newSet);
+                    }} />
+                    <div>
+                      <div className="font-semibold mb-1">{trial.title}</div>
+                      <div className="text-xs text-gray-500">
+                        <span className="font-medium">Protocol Type:</span> {trial.protocolType} &nbsp; &nbsp;
+                        <span className="font-medium">NCT Number:</span> {trial.nctNumber}
+                      </div>
+                      {trial.briefSummary && (
+                        <div className="text-sm text-gray-700 mt-1 line-clamp-2">
+                          {trial.briefSummary}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          )}
+          
+          {activeTab === 'clinical-specialties' && (
+            <>
+              {paginatedSpecialties.length === 0 ? (
+                <div className="text-gray-500 italic">No clinical specialties found.</div>
+              ) : (
+                paginatedSpecialties.map((specialty, i) => (
+                  <div key={specialty.personMesh} className="flex items-start space-x-2 bg-white border border-gray-200 rounded p-3">
+                    <Checkbox id={`specialty-${specialty.personMesh}`} className="mt-1 text-blue-600 border-blue-600 focus:ring-blue-600" checked={selectedSpecialties.has(specialty.personMesh)} onCheckedChange={checked => {
+                      const newSet = new Set<string>(selectedSpecialties);
+                      if (checked) newSet.add(specialty.personMesh);
+                      else newSet.delete(specialty.personMesh);
+                      setSelectedSpecialties(newSet);
+                    }} />
+                    <div>
+                      <div className="font-semibold mb-1">{specialty.personMesh}</div>
+                      <div className="text-xs text-gray-500">
+                        <span className="font-medium">Score:</span> {specialty.scoreBestMatch}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
           )}
         </div>
         {/* Pagination controls */}
-        {totalPages > 1 && (
+        {activeTab === 'publications' && totalPages > 1 && (
           <div className="flex justify-center items-center space-x-4 mt-4">
             <Button
               className="px-3 py-1"
@@ -575,13 +946,75 @@ export default function Home() {
             </Button>
           </div>
         )}
+        {activeTab === 'grants' && totalGrantsPages > 1 && (
+          <div className="flex justify-center items-center space-x-4 mt-4">
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-gray-600">Page {currentPage + 1} of {totalGrantsPages}</span>
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage >= totalGrantsPages - 1}
+              onClick={() => setCurrentPage(p => Math.min(totalGrantsPages - 1, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        )}
+        {activeTab === 'clinical-specialties' && totalSpecialtiesPages > 1 && (
+          <div className="flex justify-center items-center space-x-4 mt-4">
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-gray-600">Page {currentPage + 1} of {totalSpecialtiesPages}</span>
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage >= totalSpecialtiesPages - 1}
+              onClick={() => setCurrentPage(p => Math.min(totalSpecialtiesPages - 1, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        )}
+        {activeTab === 'clinical-trials' && totalTrialsPages > 1 && (
+          <div className="flex justify-center items-center space-x-4 mt-4">
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-gray-600">Page {currentPage + 1} of {totalTrialsPages}</span>
+            <Button
+              className="px-3 py-1"
+              disabled={currentPage >= totalTrialsPages - 1}
+              onClick={() => setCurrentPage(p => Math.min(totalTrialsPages - 1, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* History */}
       <div className="mt-10">
         <h2 className="text-xl font-semibold mb-2">History</h2>
         <div className="flex justify-end mb-2">
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">Export to CSV</Button>
+          <Button 
+            onClick={handleExportToCSV}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded"
+          >
+            Export to CSV
+          </Button>
         </div>
         {history.length > 0 ? (
           <div className="overflow-x-auto bg-white border border-gray-200 rounded">
@@ -597,7 +1030,12 @@ export default function Home() {
                 {history.map((entry, index) => (
                   <tr key={index}>
                     <td className="px-4 py-2 align-top">{entry.date}</td>
-                    <td className="px-4 py-2 align-top">{entry.output}</td>
+                    <td className="px-4 py-2 align-top">
+                      {entry.output.length > 100 
+                        ? `${entry.output.substring(0, 100)}...` 
+                        : entry.output
+                      }
+                    </td>
                     <td className="px-4 py-2 align-top">{entry.controls}</td>
                   </tr>
                 ))}
